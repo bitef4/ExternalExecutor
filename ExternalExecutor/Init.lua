@@ -77,6 +77,26 @@ env.identifyexecutor = function()
 end
 env.getexecutorname = env.identifyexecutor
 
+env.setfpscap = function(cap)
+	cap = tonumber(cap)
+	assert(type(cap) == "number", "invalid argument #1 to 'setfpscap' (number expected, got " .. type(cap) .. ")", 2)
+	
+	local settings = UserSettings()
+	if settings and settings.GameSettings then
+		settings.GameSettings.FramerateCap = cap
+	end
+end
+env.setfps = env.setfpscap
+
+env.getfpscap = function()
+	local settings = UserSettings()
+	if settings and settings.GameSettings then
+		return settings.GameSettings.FramerateCap
+	end
+	return 60 -- Default
+end
+env.getfps = env.getfpscap
+
 env.compile = function(code : string, encoded : bool)
 	local code = typeof(code) == "string" and code or ""
 	local encoded = typeof(encoded) == "boolean" and encoded or false
@@ -182,13 +202,12 @@ env.request = function(options)
 	assert(not (options.Method == "GET" and options.Body), "invalid option 'Body' for argument #1 to 'request' (current method is GET but option 'Body' was used)", 2)
 	if options.Body then
 		assert(type(options.Body) == "string", "invalid option 'Body' for argument #1 to 'request' (string expected, got " .. type(options.Body) .. ") ", 2)
-		assert(pcall(function() hs:JSONDecode(options.Body) end), "invalid option 'Body' for argument #1 to 'request' (invalid json string format)", 2)
 	end
 	if options.Headers then assert(type(options.Headers) == "table", "invalid option 'Headers' for argument #1 to 'request' (table expected, got " .. type(options.Url) .. ") ", 2) end
 	options.Body = options.Body or "{}"
 	options.Headers = options.Headers or {}
 	if (options.Headers["User-Agent"]) then assert(type(options.Headers["User-Agent"]) == "string", "invalid option 'User-Agent' for argument #1 to 'request.Header' (string expected, got " .. type(options.Url) .. ") ", 2) end
-	options.Headers["User-Agent"] = options.Headers["User-Agent"] or "ExternalExecutor/1.0.1"
+	options.Headers["User-Agent"] = options.Headers["User-Agent"] or "ExternalExecutorV1.0.0"
 	options.Headers["ExternalExecutor-Fingerprint"] = Vernushwd
 	options.Headers["Cache-Control"] = "no-cache"
 	options.Headers["Roblox-Place-Id"] = tostring(game.PlaceId)
@@ -209,7 +228,7 @@ env.request = function(options)
 			result['r'] = "Unknown"
 		end
 		return {
-			Success = tonumber(result['c']) and tonumber(result['c']) > 200 and tonumber(result['c']) < 300,
+			Success = tonumber(result['c']) and tonumber(result['c']) >= 200 and tonumber(result['c']) < 300,
 			StatusMessage = result['r'],
 			StatusCode = tonumber(result['c']),
 			Body = result['b'],
@@ -401,6 +420,9 @@ base64.decode = env.base64decode
 
 env.base64 = base64
 
+local executor_closures = {}
+setmetatable(executor_closures, {__mode = "k"})
+
 env.islclosure = function(func)
 	assert(type(func) == "function", "invalid argument #1 to 'islclosure' (function expected, got " .. type(func) .. ") ", 2)
 	return debug.info(func, "s") ~= "[C]"
@@ -427,6 +449,8 @@ env.newcclosure = function(func)
 			coroutine.yield(func(...))
 		end
 	end)
+	-- Mark as executor closure
+	executor_closures[cloned] = true
 	return cloned
 end
 
@@ -775,7 +799,7 @@ if HashRes and HashRes.Body then
 	if func then
 		HashLib = func()
 	else
-		warn("HasbLib Failed To Load Error: " .. tostring(err))
+		warn("HashLib Failed To Load Error: " .. tostring(err))
 	end
 end
 
@@ -805,6 +829,271 @@ crypt.hash = function(txt, hashName)
 end
 
 env.crypt = crypt
+
+-- Filesystem Library
+env.writefile = function(filepath, content)
+	assert(type(filepath) == "string", "invalid argument #1 to 'writefile' (string expected, got " .. type(filepath) .. ")")
+	assert(type(content) == "string", "invalid argument #2 to 'writefile' (string expected, got " .. type(content) .. ")")
+	
+	local blocked_extensions = {".exe", ".dll", ".bat", ".cmd", ".com", ".scr", ".vbs", ".js", ".jar", ".msi", ".pif", ".cpl", ".msc", ".ps1"}
+	local lower_path = filepath:lower()
+	for _, ext in ipairs(blocked_extensions) do
+		if lower_path:sub(-#ext) == ext then
+			error("writefile: blocked file extension: " .. ext, 2)
+		end
+	end
+	
+	local result = nukedata(content, "writefile", { path = filepath })
+	return result == "true"
+end
+env.write = env.writefile
+
+env.readfile = function(filepath)
+	assert(type(filepath) == "string", "invalid argument #1 to 'readfile' (string expected, got " .. type(filepath) .. ")")
+	local result = nukedata("", "readfile", { path = filepath })
+	if result:find("^%[ERROR%]") then
+		error(result, 2)
+	end
+	return result
+end
+env.read = env.readfile
+
+env.appendfile = function(filepath, content)
+	assert(type(filepath) == "string", "invalid argument #1 to 'appendfile' (string expected, got " .. type(filepath) .. ")")
+	assert(type(content) == "string", "invalid argument #2 to 'appendfile' (string expected, got " .. type(content) .. ")")
+	
+	local blocked_extensions = {".exe", ".dll", ".bat", ".cmd", ".com", ".scr", ".vbs", ".js", ".jar", ".msi", ".pif", ".cpl", ".msc", ".ps1"}
+	local lower_path = filepath:lower()
+	for _, ext in ipairs(blocked_extensions) do
+		if lower_path:sub(-#ext) == ext then
+			error("appendfile: blocked file extension: " .. ext, 2)
+		end
+	end
+	
+	local result = nukedata(content, "appendfile", { path = filepath })
+	return result == "true"
+end
+env.append = env.appendfile
+
+env.isfile = function(filepath)
+	assert(type(filepath) == "string", "invalid argument #1 to 'isfile' (string expected, got " .. type(filepath) .. ")")
+	local result = nukedata("", "isfile", { path = filepath })
+	return result == "true"
+end
+
+env.isfolder = function(filepath)
+	assert(type(filepath) == "string", "invalid argument #1 to 'isfolder' (string expected, got " .. type(filepath) .. ")")
+	local result = nukedata("", "isfolder", { path = filepath })
+	return result == "true"
+end
+
+env.makefolder = function(folderpath)
+	assert(type(folderpath) == "string", "invalid argument #1 to 'makefolder' (string expected, got " .. type(folderpath) .. ")")
+	local result = nukedata("", "makefolder", { path = folderpath })
+	return result == "true"
+end
+
+env.listfiles = function(folderpath)
+	assert(type(folderpath) == "string", "invalid argument #1 to 'listfiles' (string expected, got " .. type(folderpath) .. ")")
+	local result = nukedata("", "listfiles", { path = folderpath })
+	local files = hs:JSONDecode(result)
+	return files or {}
+end
+
+env.delfile = function(filepath)
+	assert(type(filepath) == "string", "invalid argument #1 to 'delfile' (string expected, got " .. type(filepath) .. ")")
+	local result = nukedata("", "delfile", { path = filepath })
+	return result == "true"
+end
+
+env.delfolder = function(folderpath)
+	assert(type(folderpath) == "string", "invalid argument #1 to 'delfolder' (string expected, got " .. type(folderpath) .. ")")
+	local result = nukedata("", "delfolder", { path = folderpath })
+	return result == "true"
+end
+
+env.loadfile = function(filepath)
+	assert(type(filepath) == "string", "invalid argument #1 to 'loadfile' (string expected, got " .. type(filepath) .. ")")
+	local success, content = pcall(env.readfile, filepath)
+	if not success then
+		return nil, content
+	end
+	return env.loadstring(content, "@" .. filepath)
+end
+
+env.dofile = function(filepath)
+	assert(type(filepath) == "string", "invalid argument #1 to 'dofile' (string expected, got " .. type(filepath) .. ")")
+	local func, err = env.loadfile(filepath)
+	if not func then
+		error(err, 2)
+	end
+	return func()
+end
+
+env.getscriptbytecode = function(script)
+	script = ToObject(script)
+	assert(typeof(script) == "Instance", "invalid argument #1 to 'getscriptbytecode' (Instance expected, got " .. typeof(script) .. ")", 2)
+	assert(script:IsA("LuaSourceContainer"), "invalid argument #1 to 'getscriptbytecode' (LuaSourceContainer expected, got " .. script.ClassName .. ")", 2)
+	
+	local obj = Instance.new("ObjectValue", Pointer)
+	obj.Name = hs:GenerateGUID(false)
+	obj.Value = script
+	
+	local bytecode = nukedata("", "getscriptbytecode", {
+		["cn"] = obj.Name
+	})
+	
+	obj:Destroy()
+	
+	if bytecode == "" or bytecode == "-- Bytecode extraction not yet implemented" then
+		return nil
+	end
+	
+	return bytecode
+end
+env.dumpstring = env.getscriptbytecode
+env.getscripthash = function(script)
+	script = ToObject(script)
+	assert(typeof(script) == "Instance", "invalid argument #1 to 'getscripthash' (Instance expected, got " .. typeof(script) .. ")", 2)
+	assert(script:IsA("LuaSourceContainer"), "invalid argument #1 to 'getscripthash' (LuaSourceContainer expected, got " .. script.ClassName .. ")", 2)
+	
+	local obj = Instance.new("ObjectValue", Pointer)
+	obj.Name = hs:GenerateGUID(false)
+	obj.Value = script
+	
+	local hash = nukedata("", "getscripthash", {
+		["cn"] = obj.Name
+	})
+	
+	obj:Destroy()
+	
+	if hash == "" then
+		return nil
+	end
+	
+	return hash
+end
+
+
+env.http_request = env.request
+env.syn = env.syn or {}
+env.syn.request = env.request
+
+env.getexecutorversion = function()
+	local _, version = env.identifyexecutor()
+	return version
+end
+env.whatexecutor = env.identifyexecutor
+
+env.getcustomasset = function(filepath)
+	assert(type(filepath) == "string", "invalid argument #1 to 'getcustomasset' (string expected, got " .. type(filepath) .. ")", 2)
+	
+	local result = nukedata("", "getcustomasset", {
+		path = filepath
+	})
+	
+	if result == "" or result == nil then
+		error("getcustomasset: file not found or failed to load '" .. filepath .. "'", 2)
+	end
+	
+	return result
+end
+
+env.setclipboard = function(content)
+	assert(content ~= nil, "invalid argument #1 to 'setclipboard' (value expected, got nil)", 2)
+	content = tostring(content)
+	
+	if #content < 1 then
+		return
+	end
+	
+	local result = nukedata(content, "setclipboard", {})
+	return result == "true"
+end
+env.toclipboard = env.setclipboard
+env.setrbxclipboard = env.setclipboard
+
+env.lz4compress = function(data)
+	assert(type(data) == "string", "invalid argument #1 to 'lz4compress' (string expected, got " .. type(data) .. ")", 2)
+	
+	local result = nukedata(data, "lz4compress", {})
+	return result
+end
+
+env.lz4decompress = function(data, size)
+	assert(type(data) == "string", "invalid argument #1 to 'lz4decompress' (string expected, got " .. type(data) .. ")", 2)
+	assert(type(size) == "number", "invalid argument #2 to 'lz4decompress' (number expected, got " .. type(size) .. ")", 2)
+	
+	local result = nukedata(data, "lz4decompress", {
+		originalSize = tostring(size)
+	})
+	return result
+end
+
+env.isreadonly = function(tbl)
+	assert(type(tbl) == "table", "invalid argument #1 to 'isreadonly' (table expected, got " .. type(tbl) .. ")", 2)
+	return table.isfrozen(tbl)
+end
+
+env.getscripts = function()
+	local Scripts = {}
+	for i, v in pairs(objects) do
+		local fullName = v.proxy:GetFullName()
+		if not fullName:find("CoreGui") and not fullName:find("CorePackages") then
+			if v.proxy:IsA("LocalScript") or v.proxy:IsA("ModuleScript") then
+				table.insert(Scripts, v.proxy)
+			elseif v.proxy:IsA("Script") then
+				if v.proxy.RunContext == Enum.RunContext.Client or v.proxy.RunContext == Enum.RunContext.Legacy then
+					table.insert(Scripts, v.proxy)
+				end
+			end
+		end
+	end
+	return Scripts
+end
+
+env.isexecutorclosure = function(func)
+	if type(func) ~= "function" then
+		error("invalid argument #1 to 'isexecutorclosure' (function expected, got " .. type(func) .. ")", 2)
+	end
+	
+	if executor_closures[func] then
+		return true
+	end
+	
+	if env.iscclosure(func) then
+		if debug.info(func, 'n') ~= "" then
+			return false
+		else
+			return true
+		end
+	end
+	
+	local success, fenv = pcall(getfenv, func)
+	if not success then
+		return false
+	end
+	
+	if typeof(fenv.script) ~= "Instance" then
+		return true
+	end
+	
+	if fenv.script.Name == "AvatarEditorPrompts" or fenv.script.Name == "JestGlobals" then
+		return false
+	end
+	
+	if fenv.script.Parent == nil then
+		return true
+	end
+	
+	if fenv == getfenv(0) then
+		return true
+	end
+	
+	return true
+end
+env.checkclosure = env.isexecutorclosure
+env.isourclosure = env.isexecutorclosure
 
 -- listener
 
