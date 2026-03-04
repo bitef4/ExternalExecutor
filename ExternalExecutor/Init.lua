@@ -449,7 +449,6 @@ env.newcclosure = function(func)
 			coroutine.yield(func(...))
 		end
 	end)
-	-- Mark as executor closure
 	executor_closures[cloned] = true
 	return cloned
 end
@@ -1123,5 +1122,6 @@ task.spawn(function()
 end)
 
 print("Injected!")
+
 
 return {HideTemp = function() end}
