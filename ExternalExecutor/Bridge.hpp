@@ -273,7 +273,6 @@ inline void Load() {
         std::filesystem::create_directories(fpath.parent_path());
         std::ofstream file(filepath, std::ios::binary | std::ios::app);
         if (file.is_open()) {
-            // Write and verify that the write succeeded
             if (file.write(dta.c_str(), dta.size()).good()) {
                 file.close();
                 return "true";
@@ -619,4 +618,5 @@ inline void StartBridge()
 inline void Execute(std::string source) {
 	script = source;
 	order += 1;
+
 }
