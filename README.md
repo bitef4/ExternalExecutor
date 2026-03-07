@@ -11,9 +11,9 @@ Version: 1.0.1
 # Features
 LEVEL 3
 
-UNC 44% - crashed when testing unc but saw 44%, will fix later
+UNC 53% 
 
-SUNC 32% // https://r.sunc.su/3Tk47rPJsy
+SUNC 37% // https://r.sunc.su/VnJ904xDHZ
 
 # Changelogs
 
@@ -35,4 +35,8 @@ lz4decompress
 loadfile
 isexecutorclosure
 getscripthash
+getscriptbytecode
+writefile
+getcustomasset
+loadstring
 ```
