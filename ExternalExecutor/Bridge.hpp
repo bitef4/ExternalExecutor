@@ -9,6 +9,10 @@ using json = nlohmann::json;
 #include <regex>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
 
 #include "Utils/Process.hpp"
 #include "Utils/Instance.hpp"
@@ -129,69 +133,102 @@ inline void Load() {
 		return "";
 		};
 	env["request"] = [](std::string dta, nlohmann::json set, DWORD pid) {
-		std::string url = set["l"];
-		std::string method = set["m"];
-		std::string rBody = set["b"];
-		json headersJ = set["h"];
+		try {
+			std::string url = set["l"];
+			std::string method = set["m"];
+			std::string rBody = set["b"];
+			json headersJ = set["h"];
 
-		std::regex urlR(R"(^(http[s]?:\/\/)?([^\/]+)(\/.*)?$)");
-		std::smatch urlM;
-		std::string host;
-		std::string path = "/";
+			std::regex urlR(R"(^(http[s]?:\/\/)?([^\/]+)(\/.*)?$)");
+			std::smatch urlM;
+			std::string host;
+			std::string path = "/";
 
-		if (std::regex_match(url, urlM, urlR)) {
-			host = urlM[2];
-			if (urlM[3].matched) path = urlM[3];
-		}
-		else {
-			return std::string("[]");
-		}
-
-		Client client(host.c_str());
-		client.set_follow_location(true);
-
-		Headers headers;
-		for (auto it = headersJ.begin(); it != headersJ.end(); ++it) {
-			headers.insert({ it.key(), it.value() });
-		}
-
-		Result proxiedRes;
-		if (method == "GET") {
-			proxiedRes = client.Get(path, headers);
-		}
-		else if (method == "POST") {
-			proxiedRes = client.Post(path, headers, rBody, "application/json");
-		}
-		else if (method == "PUT") {
-			proxiedRes = client.Put(path, headers, rBody, "application/json");
-		}
-		else if (method == "DELETE") {
-			proxiedRes = client.Delete(path, headers, rBody, "application/json");
-		}
-		else if (method == "PATCH") {
-			proxiedRes = client.Patch(path, headers, rBody, "application/json");
-		}
-		else {
-			return std::string("[]");
-		}
-
-		if (proxiedRes) {
-			json responseJ;
-			responseJ["b"] = proxiedRes->body;
-			responseJ["c"] = proxiedRes->status;
-			responseJ["r"] = proxiedRes->reason;
-			responseJ["v"] = proxiedRes->version;
-
-			json rHeadersJ;
-			for (const auto& header : proxiedRes->headers) {
-				rHeadersJ[header.first] = header.second;
+			if (std::regex_match(url, urlM, urlR)) {
+				host = urlM[2];
+				if (urlM[3].matched) path = urlM[3];
 			}
-			responseJ["h"] = rHeadersJ;
+			else {
+				json errorJ;
+				errorJ["b"] = "";
+				errorJ["c"] = 400;
+				errorJ["r"] = "Bad Request";
+				errorJ["v"] = "HTTP/1.1";
+				errorJ["h"] = json::object();
+				return errorJ.dump();
+			}
 
-			return responseJ.dump();
+			Client client(host.c_str());
+			client.set_follow_location(true);
+			client.set_connection_timeout(10);
+			client.set_read_timeout(30);
+
+			Headers headers;
+			for (auto it = headersJ.begin(); it != headersJ.end(); ++it) {
+				headers.insert({ it.key(), it.value() });
+			}
+
+			Result proxiedRes;
+			if (method == "GET") {
+				proxiedRes = client.Get(path, headers);
+			}
+			else if (method == "POST") {
+				proxiedRes = client.Post(path, headers, rBody, "application/json");
+			}
+			else if (method == "PUT") {
+				proxiedRes = client.Put(path, headers, rBody, "application/json");
+			}
+			else if (method == "DELETE") {
+				proxiedRes = client.Delete(path, headers, rBody, "application/json");
+			}
+			else if (method == "PATCH") {
+				proxiedRes = client.Patch(path, headers, rBody, "application/json");
+			}
+			else {
+				json errorJ;
+				errorJ["b"] = "";
+				errorJ["c"] = 405;
+				errorJ["r"] = "Method Not Allowed";
+				errorJ["v"] = "HTTP/1.1";
+				errorJ["h"] = json::object();
+				return errorJ.dump();
+			}
+
+			if (proxiedRes) {
+				json responseJ;
+				responseJ["b"] = proxiedRes->body;
+				responseJ["c"] = proxiedRes->status;
+				responseJ["r"] = proxiedRes->reason;
+				responseJ["v"] = proxiedRes->version;
+
+				json rHeadersJ;
+				for (const auto& header : proxiedRes->headers) {
+					rHeadersJ[header.first] = header.second;
+				}
+				responseJ["h"] = rHeadersJ;
+
+				return responseJ.dump();
+			}
+			
+			json errorJ;
+			errorJ["b"] = "";
+			errorJ["c"] = 0;
+			errorJ["r"] = "ConnectFail";
+			errorJ["v"] = "HTTP/1.1";
+			errorJ["h"] = json::object();
+			return errorJ.dump();
 		}
-		return std::string("[]");
+		catch (...) {
+			json errorJ;
+			errorJ["b"] = "";
+			errorJ["c"] = 500;
+			errorJ["r"] = "Internal Server Error";
+			errorJ["v"] = "HTTP/1.1";
+			errorJ["h"] = json::object();
+			return errorJ.dump();
+		}
 		};
+
 
 	env["writefile"] = [](std::string dta, nlohmann::json set, DWORD pid) {
 		try {
@@ -230,20 +267,23 @@ inline void Load() {
 		};
 
 	env["appendfile"] = [](std::string dta, nlohmann::json set, DWORD pid) {
-		try {
-			std::string filepath = GetWorkspaceDirectory() + std::string(set["path"]);
-			std::filesystem::path fpath(filepath);
-			std::filesystem::create_directories(fpath.parent_path());
-			std::ofstream file(filepath, std::ios::binary | std::ios::app);
-			if (file.is_open()) {
-				file.write(dta.c_str(), dta.size());
-				file.close();
-				return "true";
-			}
-		}
-		catch (...) {}
-		return "false";
-		};
+    try {
+        std::string filepath = GetWorkspaceDirectory() + std::string(set["path"]);
+        std::filesystem::path fpath(filepath);
+        std::filesystem::create_directories(fpath.parent_path());
+        std::ofstream file(filepath, std::ios::binary | std::ios::app);
+        if (file.is_open()) {
+            // Write and verify that the write succeeded
+            if (file.write(dta.c_str(), dta.size()).good()) {
+                file.close();
+                return "true";
+            }
+            file.close();
+        }
+    }
+    catch (...) {}
+    return "false";
+	};
 
 	env["isfile"] = [](std::string dta, nlohmann::json set, DWORD pid) {
 		try {
@@ -315,58 +355,54 @@ inline void Load() {
 		};
 
 	env["getcustomasset"] = [](std::string dta, nlohmann::json set, DWORD pid) {
-		try {
-			std::string filepath = set["path"];
-			std::string workspacePath = GetWorkspaceDirectory();
-			std::string fullPath = workspacePath + filepath;
-			
-			if (!std::filesystem::exists(fullPath)) {
-				return std::string("");
-			}
-			
-			char* appdata = nullptr;
-			size_t len = 0;
-			if (_dupenv_s(&appdata, &len, "LOCALAPPDATA") != 0 || !appdata) {
-				return std::string("");
-			}
-			
-			std::string robloxPath = std::string(appdata) + "\\Roblox\\Versions";
-			free(appdata);
-			
-			std::string versionPath;
-			for (const auto& entry : std::filesystem::directory_iterator(robloxPath)) {
-				if (entry.is_directory() && entry.path().filename().string().find("version-") != std::string::npos) {
-					versionPath = entry.path().string();
-					break;
-				}
-			}
-			
-			if (versionPath.empty()) {
-				return std::string("");
-			}
-			
-			std::string contentPath = versionPath + "\\content\\ExternalExecutor\\";
-			std::filesystem::create_directories(contentPath);
-			
-			GUID guid;
-			CoCreateGuid(&guid);
-			char guid_str[40];
-			sprintf_s(guid_str, "%08X%04X%04X%02X%02X%02X%02X%02X%02X%02X%02X",
-				guid.Data1, guid.Data2, guid.Data3,
-				guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
-				guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-			
-			std::string extension = fullPath.substr(fullPath.find_last_of('.'));
-			std::string fileName = std::string(guid_str) + extension;
-			std::string destPath = contentPath + fileName;
-			
-			std::filesystem::copy_file(fullPath, destPath, std::filesystem::copy_options::overwrite_existing);
-			
-			return "rbxasset://ExternalExecutor/" + fileName;
-		}
-		catch (...) {}
-		return std::string("");
-		};
+    try {
+        std::string filepath = set["path"];
+        std::string workspacePath = GetWorkspaceDirectory();
+        std::string fullPath = workspacePath + filepath;
+
+        if (!std::filesystem::exists(fullPath)) {
+            return std::string("");
+        }
+
+        HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+        if (!hProcess) return std::string("");
+
+        char exePath[MAX_PATH];
+        if (GetModuleFileNameExA(hProcess, NULL, exePath, MAX_PATH) == 0) {
+            CloseHandle(hProcess);
+            return std::string("");
+        }
+        CloseHandle(hProcess);
+
+        std::string exeDir = exePath;
+        size_t pos = exeDir.find_last_of("\\/");
+        if (pos != std::string::npos) {
+            exeDir = exeDir.substr(0, pos);
+        }
+
+        std::string contentPath = exeDir + "\\content\\ExternalExecutor\\";
+        std::filesystem::create_directories(contentPath);
+
+        GUID guid;
+        CoCreateGuid(&guid);
+        char guid_str[40];
+        sprintf_s(guid_str, "%08X%04X%04X%02X%02X%02X%02X%02X%02X%02X%02X",
+            guid.Data1, guid.Data2, guid.Data3,
+            guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
+            guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+
+        std::string extension = fullPath.substr(fullPath.find_last_of('.'));
+        std::string fileName = std::string(guid_str) + extension;
+        std::string destPath = contentPath + fileName;
+
+        std::filesystem::copy_file(fullPath, destPath, std::filesystem::copy_options::overwrite_existing);
+
+        return "rbxasset://ExternalExecutor/" + fileName;
+    }
+    catch (...) {
+        return std::string("");
+    }
+	};
 
 	env["setclipboard"] = [](std::string dta, nlohmann::json set, DWORD pid) {
 		try {
@@ -449,14 +485,38 @@ inline void Load() {
 		return std::string("");
 		};
 
-	env["getscriptbytecode"] = [](std::string dta, nlohmann::json set, DWORD pid) {
-		try {
-			Instance script = GetPointerInstance(set["cn"], pid);
-			return std::string("");
-		}
-		catch (...) {}
-		return std::string("");
-		};
+	env["getscriptbytecode"] = [](std::string dta, nlohmann::json set, DWORD pid) -> std::string {
+    try {
+        Instance script = GetPointerInstance(set["cn"], pid);
+        uintptr_t scriptAddr = script.GetAddress();
+        if (!scriptAddr) return "";
+
+        std::string className = script.ClassName();
+        uintptr_t bytecodeOffset = 0;
+        if (className == "LocalScript" || className == "Script")
+            bytecodeOffset = Offsets::LocalScriptByteCode;
+        else if (className == "ModuleScript")
+            bytecodeOffset = Offsets::ModuleScriptByteCode;
+        else
+            return "";
+
+        uintptr_t containerPtr = ReadMemory<uintptr_t>(scriptAddr + bytecodeOffset, pid);
+        if (!containerPtr) return "";
+
+        uintptr_t dataPtr = ReadMemory<uintptr_t>(containerPtr + 0x10, pid);
+        size_t size = ReadMemory<size_t>(containerPtr + 0x20, pid);
+        if (!dataPtr || size == 0 || size > 10 * 1024 * 1024) return "";
+
+        std::vector<char> compressed(size);
+        Memory::ReadNative(dataPtr, compressed.data(), size, pid);
+        std::string compressedStr(compressed.data(), size);
+
+        return Bytecode::DecompressBytecode(compressedStr);
+    }
+    catch (...) {
+        return "";
+    }
+	};
 
 	env["getinstanceaddr"] = [](std::string dta, nlohmann::json set, DWORD pid) {
 		try {

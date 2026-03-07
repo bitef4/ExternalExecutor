@@ -129,4 +129,37 @@ namespace Bytecode {
         signed_bytecode.append(reinterpret_cast<const char*>(footer.data()), footer.size());
         return Compress(signed_bytecode, s);
     }
+
+    inline std::string DecompressBytecode(const std::string& compressed) {
+        const uint8_t* data = reinterpret_cast<const uint8_t*>(compressed.data());
+        size_t size = compressed.size();
+        if (size < 8) return "";
+
+        std::vector<uint8_t> buffer(data, data + size);
+        uint8_t header[4];
+
+        for (int i = 0; i < 4; i++) {
+            header[i] = buffer[i] ^ "RSB1"[i];
+            header[i] = (header[i] - i * 41) % 256;
+        }
+
+        for (size_t i = 0; i < size; i++) {
+            buffer[i] ^= (header[i % 4] + i * 41) % 256;
+        }
+
+        uint32_t hash = 0;
+        for (int i = 0; i < 4; i++) hash |= header[i] << (i * 8);
+        uint32_t computed = XXH32(buffer.data(), buffer.size(), 42);
+        if (computed != hash) return "";
+
+        uint32_t decompressedSize = 0;
+        for (int i = 4; i < 8; i++) decompressedSize |= buffer[i] << ((i - 4) * 8);
+        if (decompressedSize == 0 || decompressedSize > 10 * 1024 * 1024) return "";
+
+        std::vector<char> decompressed(decompressedSize);
+        size_t actual = ZSTD_decompress(decompressed.data(), decompressedSize,
+                                         buffer.data() + 8, size - 8);
+        if (ZSTD_isError(actual)) return "";
+        return std::string(decompressed.data(), actual);
+    }
 }

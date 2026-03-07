@@ -1,5 +1,3 @@
-print("Loading!")
-
 local cg = game:GetService("CoreGui")
 local hs = game:GetService("HttpService")
 local is = game:GetService("InsertService")
@@ -434,14 +432,6 @@ env.iscclosure = function(func)
 	return debug.info(func, "s") == "[C]"
 end
 
-env.newlclosure = function(func)
-	assert(type(func) == "function", "invalid argument #1 to 'newlclosure' (function expected, got " .. type(func) .. ") ", 2)
-	local cloned = function(...)
-		return func(...)
-	end
-	return cloned
-end
-
 env.newcclosure = function(func)
 	assert(type(func) == "function", "invalid argument #1 to 'newcclosure' (function expected, got " .. type(func) .. ") ", 2)
 	local cloned = coroutine.wrap(function(...)
@@ -452,7 +442,6 @@ env.newcclosure = function(func)
 	executor_closures[cloned] = true
 	return cloned
 end
-
 env.clonefunction = function(func)
 	assert(type(func) == "function", "invalid argument #1 to 'clonefunction' (function expected, got " .. type(func) .. ") ", 2)
 	if env.iscclosure(func) then
@@ -715,13 +704,19 @@ env.getloadedmodules = function()
 end
 
 env.getrunningscripts = function()
-	local RunningScripts = {}
-	for i, v in pairs(objects) do
-		if v.proxy:IsA("ModuleScript") then
-			table.insert(RunningScripts, v.proxy)
-		end
-	end
-	return RunningScripts
+    local RunningScripts = {}
+    for i, v in pairs(objects) do
+        local script = v.proxy
+        if script:IsA("Script") or script:IsA("LocalScript") or script:IsA("ModuleScript") then
+            local fullName = script:GetFullName()
+            if not fullName:find("CoreGui") and not fullName:find("CorePackages") then
+                if not script:FindFirstAncestorOfClass("Actor") then
+                    table.insert(RunningScripts, script)
+                end
+            end
+        end
+    end
+    return RunningScripts
 end
 
 env.getscripts = function()
@@ -834,7 +829,14 @@ env.writefile = function(filepath, content)
 	assert(type(filepath) == "string", "invalid argument #1 to 'writefile' (string expected, got " .. type(filepath) .. ")")
 	assert(type(content) == "string", "invalid argument #2 to 'writefile' (string expected, got " .. type(content) .. ")")
 	
-	local blocked_extensions = {".exe", ".dll", ".bat", ".cmd", ".com", ".scr", ".vbs", ".js", ".jar", ".msi", ".pif", ".cpl", ".msc", ".ps1"}
+	local blocked_extensions = {".exe", ".scr", ".bat", ".com", ".csh", ".msi", ".vb", ".vbs",
+".vbe", ".ws", ".wsf", ".wsh", ".ps1", ".py", ".apk", ".pif", ".cpl", ".msc",
+".jar", ".cmd", ".hta", "gadget", ".inf", ".ins", ".isp", ".psd1", ".psm1",
+".reg", ".scf", ".shb", ".sys", ".js", ".jse", ".lnk", ".msp",
+".zip", ".rar", ".7z", ".tar", ".gz", ".cab", ".iso", ".img",
+".dll", ".ocx", ".drv", ".vxd", ".xml", ".ini", ".cpp", ".c", ".url", ".uri",
+".deb", ".rpm", ".sh", ".bash", ".zsh", ".fish", ".npm" }
+
 	local lower_path = filepath:lower()
 	for _, ext in ipairs(blocked_extensions) do
 		if lower_path:sub(-#ext) == ext then
@@ -858,19 +860,27 @@ end
 env.read = env.readfile
 
 env.appendfile = function(filepath, content)
-	assert(type(filepath) == "string", "invalid argument #1 to 'appendfile' (string expected, got " .. type(filepath) .. ")")
-	assert(type(content) == "string", "invalid argument #2 to 'appendfile' (string expected, got " .. type(content) .. ")")
-	
-	local blocked_extensions = {".exe", ".dll", ".bat", ".cmd", ".com", ".scr", ".vbs", ".js", ".jar", ".msi", ".pif", ".cpl", ".msc", ".ps1"}
-	local lower_path = filepath:lower()
-	for _, ext in ipairs(blocked_extensions) do
-		if lower_path:sub(-#ext) == ext then
-			error("appendfile: blocked file extension: " .. ext, 2)
-		end
-	end
-	
-	local result = nukedata(content, "appendfile", { path = filepath })
-	return result == "true"
+    assert(type(filepath) == "string", "invalid argument #1 to 'appendfile' (string expected, got " .. type(filepath) .. ")", 2)
+    assert(type(content) == "string", "invalid argument #2 to 'appendfile' (string expected, got " .. type(content) .. ")", 2)
+
+    local blocked_extensions = {".exe", ".scr", ".bat", ".com", ".csh", ".msi", ".vb", ".vbs",
+        ".vbe", ".ws", ".wsf", ".wsh", ".ps1", ".py", ".apk", ".pif", ".cpl", ".msc",
+        ".jar", ".cmd", ".hta", "gadget", ".inf", ".ins", ".isp", ".psd1", ".psm1",
+        ".reg", ".scf", ".shb", ".sys", ".js", ".jse", ".lnk", ".msp",
+        ".zip", ".rar", ".7z", ".tar", ".gz", ".cab", ".iso", ".img",
+        ".dll", ".ocx", ".drv", ".vxd", ".xml", ".ini", ".cpp", ".c", ".url", ".uri",
+        ".deb", ".rpm", ".sh", ".bash", ".zsh", ".fish", ".npm"}
+    local lower_path = filepath:lower()
+    for _, ext in ipairs(blocked_extensions) do
+        if lower_path:sub(-#ext) == ext then
+            error("appendfile: blocked file extension: " .. ext, 2)
+        end
+    end
+
+    local result = nukedata(content, "appendfile", { path = filepath })
+    if result ~= "true" then
+        error("appendfile: failed to append to file '" .. filepath .. "'", 2)
+    end
 end
 env.append = env.appendfile
 
