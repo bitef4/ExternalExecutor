@@ -563,7 +563,7 @@ inline void Load() {
 
         std::string compressed = ReadStdString(embeddedPtr + 0x10, pid);
         if (compressed.empty())
-            return ""; // Lua will convert "" → nil
+            return "";
 
         return SHA384Hex(reinterpret_cast<const uint8_t*>(compressed.data()), compressed.size());
     }
@@ -620,3 +620,4 @@ inline void Execute(std::string source) {
 	order += 1;
 
 }
+
